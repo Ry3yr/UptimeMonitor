@@ -81,7 +81,7 @@
   </style>
 </head>
 <body>
-<h1><u>Domain Uptime </u>"<a target="_blank" href="https://alceawis.de/other/extra/scripts/fakesocialmedia/commentload.html?number=5000&text=When you don%27t want to ge"  style=color:#28a745>Monitor</a>" <a href="http://127.0.0.1:8080/2025-08-04-UptimeCheck/sync.php" target="_blank" style=color:lightgrey>Sync</a>
+<h1><u>Domain Uptime </u>"<a target="_blank" href="https://alceawis.de/other/extra/scripts/fakesocialmedia/commentload.html?number=5000&text=When you don%27t want to ge"  style=color:#28a745>Monitor</a>" <a href="http://127.0.0.1:8080/2025-08-04-UptimeCheck/sync.php" target="_blank" style=color:lightgrey>Sync</a> <a target="_blank" href="check.php" style=color:blue>⟳</a>
 </h1>
 <div id="container"></div>
 <div id="popup" class="popup"></div>
@@ -104,7 +104,6 @@
     return datetime.split(' ')[0];
   }
 
-  // Unique per day (latest DOWN takes precedence)
   function filterUniquePerDay(entries) {
     const map = new Map();
 
@@ -113,31 +112,32 @@
       if (!map.has(day)) {
         map.set(day, []);
       }
-      map.get(day).push(entry); // Add entry for this day
+      map.get(day).push(entry);
     }
 
-    // Now we process to keep only the latest entry per day, with a preference for DOWN
-    return Array.from(map.entries()).map(([day, entries]) => {
-      // Sort entries for the day to always take the latest one
+    // Create array with all entries per day
+    const daysArray = Array.from(map.entries()).map(([day, entries]) => {
+      // Sort entries within the day (newest first)
       entries.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-      // Prefer DOWN if there's any
+      // Prefer DOWN status if any exists for the day
       const latestEntry = entries.find(entry => entry.response_code !== 200) || entries[0];
-      
-      return { day, entry: latestEntry, allEntries: entries }; // Store the latest entry per day, and all entries for the day
-    }).reverse(); // Reverse to get oldest to newest order
+      return { day, entry: latestEntry, allEntries: entries };
+    });
+
+    // Sort days by date (newest first)
+    daysArray.sort((a, b) => new Date(b.day) - new Date(a.day));
+
+    return daysArray;
   }
 
   async function loadDomainData(filename) {
     try {
       const url = `${filename}?t=${new Date().getTime()}`;
-
       const res = await fetch(url, {
         headers: {
           'Cache-Control': 'no-store',
         }
       });
-
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return Array.isArray(data) ? data : [];
@@ -148,14 +148,17 @@
   }
 
   function renderService(domain, entries) {
-    const filtered = filterUniquePerDay(entries); // Unique daily entries
-
-    // Calculate uptime percentage
+    const filtered = filterUniquePerDay(entries);
+    
+    // Calculate uptime percentage from all days
     const upCount = filtered.filter(entry => entry.entry.response_code === 200).length;
     const total = filtered.length;
     const uptimePercent = total ? ((upCount / total) * 100).toFixed(3) : '0.000';
-    const status = upCount === total ? 'Operational' : 'Issues';
-    const statusClass = upCount === total ? 'up' : 'down';
+    
+    // Status is determined by newest entry (first in our sorted array)
+    const newestEntry = filtered.length > 0 ? filtered[0].entry : null;
+    const status = newestEntry && newestEntry.response_code === 200 ? 'Operational' : 'Issues';
+    const statusClass = newestEntry && newestEntry.response_code === 200 ? 'up' : 'down';
 
     const service = document.createElement('div');
     service.className = 'service';
@@ -171,23 +174,20 @@
     const bar = service.querySelector('.bar');
     let lastSelectedBlock = null;
 
+    // Display days in reverse chronological order (newest first, left to right)
     filtered.forEach(({ day, entry, allEntries }) => {
       const block = document.createElement('div');
       block.className = `bar-block ${getStatusClass(entry.response_code)}`;
       block.title = `${entry.date}: ${statusLabel(entry.response_code)}`;
       block.dataset.day = day;
-      block.dataset.entries = JSON.stringify(allEntries); // Store all entries for the day
+      block.dataset.entries = JSON.stringify(allEntries);
       block.addEventListener('click', (evt) => {
-        // Remove selected class from previously selected block
         if (lastSelectedBlock) {
           lastSelectedBlock.classList.remove('selected');
         }
-        
-        // Add selected class to current block
         block.classList.add('selected');
         lastSelectedBlock = block;
-        
-        showPopup(evt, JSON.parse(block.dataset.entries)); // Show all entries for the day in the popup
+        showPopup(evt, JSON.parse(block.dataset.entries));
       });
       bar.appendChild(block);
     });
@@ -206,7 +206,7 @@
           Mode: ${entry.mode}
         </div>
       `;
-    }).join(''); // Join all entries for the day
+    }).join('');
 
     popup.style.display = 'block';
     popup.style.left = evt.pageX + 10 + 'px';
@@ -216,7 +216,6 @@
   document.addEventListener('click', e => {
     if (!e.target.classList.contains('bar-block')) {
       document.getElementById('popup').style.display = 'none';
-      // Remove selected class when clicking elsewhere
       const selectedBlocks = document.querySelectorAll('.bar-block.selected');
       selectedBlocks.forEach(block => block.classList.remove('selected'));
     }
@@ -234,6 +233,5 @@
 
   init();
 </script>
-
 </body>
 </html>
