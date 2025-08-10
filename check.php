@@ -1,18 +1,41 @@
 <?php
 $domains = [
-    'alceawis.de' => ['mode' => 'response_code'],  // Mode 2: Response Code Check
-    'alceawis.com' => ['mode' => 'file_check'],    // Mode 1: File Existence Check
-    'alcea-wisteria.de' => ['mode' => 'response_code'] // Mode 2: Response Code Check
+    'alceawis.de' => ['mode' => 'response_code'],
+    'alceawis.com' => ['mode' => 'file_check'],
+    'alcea-wisteria.de' => ['mode' => 'response_code']
 ];
+
+// cURL request with timeout and response code check
+function curlGetResponseCode($url, $timeout = 30) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER => true,
+        CURLOPT_NOBODY => true,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+    ]);
+
+    curl_exec($ch);
+    $responseCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error       = curl_errno($ch);
+    curl_close($ch);
+
+    // Timeout or other error? Treat as 404
+    if ($error) {
+        return 404;
+    }
+
+    return $responseCode ?: 404;
+}
+
 function checkFileExistence($url, $filename) {
-    $headers = @get_headers($url . '/' . $filename, 1);
-    return isset($headers[0]) && strpos($headers[0], '200') !== false;
+    $fullUrl = $url . '/' . $filename;
+    $responseCode = curlGetResponseCode($fullUrl, 30);
+    return $responseCode === 200;
 }
-function checkResponseCode($url) {
-    $headers = @get_headers($url, 1);
-    $responseCode = isset($headers[0]) ? (int)substr($headers[0], 9, 3) : 0;
-    return $responseCode;
-}
+
 foreach ($domains as $domain => $config) {
     $date = date('Y-m-d H:i:s');
     $mode = $config['mode'];
@@ -22,16 +45,20 @@ foreach ($domains as $domain => $config) {
         'domainname' => $domain,
         'response_code' => 0
     ];
+
     if ($mode === 'file_check') {
         $exists = checkFileExistence("https://$domain", 'favicon.png') ||
                   checkFileExistence("https://$domain", 'index.html');
         $responseData['response_code'] = $exists ? 200 : 404;
     }
+
     if ($mode === 'response_code') {
-        $responseData['response_code'] = checkResponseCode("https://$domain");
+        $responseData['response_code'] = curlGetResponseCode("https://$domain", 30);
     }
+
     $filename = "$domain.json";
     $existingData = [];
+
     if (file_exists($filename)) {
         $json = file_get_contents($filename);
         $decoded = json_decode($json, true);
@@ -39,6 +66,7 @@ foreach ($domains as $domain => $config) {
             $existingData = $decoded;
         }
     }
+
     $existingData[] = $responseData;
     file_put_contents($filename, json_encode($existingData, JSON_PRETTY_PRINT));
     echo "Test result for $domain saved/updated in $filename\n";
